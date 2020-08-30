@@ -1,0 +1,32 @@
+DEBUG: true
+TESTING: true
+SQLALCHEMY_ECHO: true
+OPEN_SIGN_AUTH: false
+
+SQLALCHEMY_DATABASE_URI: 'mysql://root:123456@127.0.0.1:3306/wallet'
+SQLALCHEMY_COMMIT_ON_TEARDOWN: true
+SQLALCHEMY_TRACK_MODIFICATIONS: true
+
+JOBS:
+  - id: scanChain
+    func: 'tasks.scan_chain:run_sync'
+    trigger: cron
+    second: '0'
+    minute: '*/1'
+
+  - id: depositChain
+    func: 'tasks.scan_chain:notify_project'
+    trigger: cron
+    second: '0'
+    minute: '*/1'
+
+  - id: collection
+    func: 'tasks.scan_chain:collection_eth'
+    trigger: cron
+    second: '0'
+    minute: '0'
+    hour: '*/1'
+
+
+ENV:
+  Environment: test
