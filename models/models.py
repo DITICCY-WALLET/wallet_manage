@@ -3,6 +3,7 @@ from datetime import datetime
 from sqlalchemy import UniqueConstraint
 
 from coin.driver.driver_base import DriverFactory
+from dt import now
 from exts import db
 from flask_sqlalchemy import orm
 
@@ -71,6 +72,16 @@ class Coin(db.Model):
                                foreign_keys="Coin.id",
                                backref="Coin")
 
+    transaction = orm.relationship('Transaction',
+                                   primaryjoin="Transaction.coin_id==Coin.id",
+                                   foreign_keys="Coin.id",
+                                   backref="Coin")
+
+    # coin = orm.relationship('Coin',
+    #                         primaryjoin="Coin.master_id==Coin.id",
+    #                         foreign_keys="Coin.id",
+    #                         backref="Coin")
+
     @staticmethod
     def get_coin(contract=None, symbol=None, name=None, is_master=1):
         params = {'is_master': is_master}
@@ -87,9 +98,24 @@ class Coin(db.Model):
         return coin
 
     @staticmethod
+    def get_coin_by_symbol(contract=None, symbol=None, name=None, is_master=1):
+        params = {'is_master': is_master}
+        if contract is not None:
+            params['contract'] = contract
+            params['is_master'] = 0
+        if symbol is not None:
+            params['symbol'] = symbol
+        if name is not None and symbol is None:
+            params['name'] = name
+        coin = Coin.query.filter_by(**params).first()
+        if not coin:
+            return None
+        return coin
+
+    @staticmethod
     def get_erc20_usdt_coin():
         """获取 ETH 的 ERC20 USDT"""
-        coin = Coin.get_coin(symbol='USDT', name="Ethereum", is_master=0)
+        coin = Coin.get_coin_by_symbol(symbol='USDT', is_master=0)
         if not coin:
             return None
         return coin
@@ -102,7 +128,7 @@ class Address(db.Model):
     )
 
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
-    coin_id = db.Column(db.Integer, nullable=False, comment="币种ID", unique=True)
+    coin_id = db.Column(db.Integer, nullable=False, comment="币种ID", index=True)
     project_id = db.Column(db.Integer, nullable=False, comment="项目方 ID")
     address = db.Column(db.VARCHAR(128), unique=True, nullable=False, comment="地址")
     address_type = db.Column(db.SmallInteger, default=0, comment="地址类型，0充 1提")
@@ -145,12 +171,18 @@ class Address(db.Model):
         :return:
         """
         session = db.session()
-        for address_dict in addresses:
-            address = Address(**address_dict)
-            session.add(address)
-        if commit:
+        try:
+            for address_dict in addresses:
+                address = Address(**address_dict)
+                session.add(address)
+            if commit:
+                session.commit()
+                return None
+            return session
+        except Exception as e:
+            # logger
+            session.rollback()
             return None
-        return session
 
     @staticmethod
     def get_coin_address_by_coin_name(coin_name):
@@ -201,12 +233,15 @@ class Transaction(db.Model):
     @classmethod
     def get_tx_coin_tx(cls, **params):
         session = db.session()
-        block_tx = session.query(Transaction, Coin).join(Transaction.coin_id == Coin.id).filter(**params)
+        block_tx = session.query(Transaction, Coin).join(Transaction, Transaction.coin_id == Coin.id).filter(**params)
         return block_tx
 
     @classmethod
     def get_tx_coin_by_tx_hash(cls, tx_hash):
-        return cls.get_tx_coin_tx(tx_hash=tx_hash).first()
+        session = db.session()
+        txs = session.query(Transaction, Coin).join(Transaction, Transaction.coin_id == Coin.id).filter(
+            Transaction.tx_hash == tx_hash)
+        return txs.first()
 
     @classmethod
     def add_transaction(cls, coin_id, tx_hash, block_time, sender, receiver, amount, status, type,
@@ -219,6 +254,33 @@ class Transaction(db.Model):
                          contract=contract, block_id=block_id, height=height)
         # saved 如果成功情况下是 None
         saved = session.add(tx)
+        if commit:
+            # 自动提交
+            session.commit()
+            return saved
+        # 返回 session 等待自行处理
+        return session
+
+    @classmethod
+    def add_transaction_or_update(cls, coin_id, tx_hash, block_time, sender, receiver, amount, status, type,
+                                  block_id, height, gas=0, gas_price=0, fee=0,
+                                  contract=None, is_send=0, *, commit=True, session=None):
+        session = session or db.session()
+
+        sql = (
+            "insert into {table_name} (coin_id, tx_hash, block_time, sender, receiver, amount, status, type, gas, "
+            "gas_price, fee, contract, block_id, height, is_send, create_time, update_time) values "
+            "({coin_id}, '{tx_hash}', {block_time}, '{sender}', '{receiver}', {amount}, {status}, {type}, {gas}, "
+            "{gas_price}, {fee}, {contract}, {block_id}, {height}, {is_send}, '{create_time}', '{update_time}')"
+            "ON DUPLICATE KEY UPDATE block_time=values(block_time), gas=values(gas), gas_price=values(gas_price), "
+            "fee=values(fee), block_id=values(block_id), height=values(height)"
+        ).format(table_name=cls.__tablename__, coin_id=coin_id, tx_hash=tx_hash, block_time=block_time, sender=sender,
+                 receiver=receiver, amount=amount, status=status, type=type, gas=gas, gas_price=gas_price, fee=fee,
+                 contract="'{}'".format(contract) if contract is not None else 'null',
+                 block_id=block_id, height=height, is_send=is_send, create_time=now(), update_time=now())
+
+        # saved 如果成功情况下是 None
+        saved = session.execute(sql)
         if commit:
             # 自动提交
             session.commit()
@@ -287,8 +349,8 @@ class ProjectCoin(db.Model):
     coin_id = db.Column(db.Integer, nullable=False, comment="主链币 ID")
     hot_address = db.Column(db.VARCHAR(128), nullable=False, comment="热钱包地址")
     hot_secret = db.Column(db.VARCHAR(128), nullable=False, comment="热钱包密钥, 保留字段, 未使用")
-    hot_pb = db.Column(db.TEXT, comment="热钱包公钥")
-    hot_pk = db.Column(db.TEXT, comment="热钱包私钥")
+    hot_pb = db.Column(db.TEXT, comment="热钱包密钥加密公钥")
+    hot_pk = db.Column(db.TEXT, comment="热钱包密钥加密私钥")
     gas = db.Column(db.VARCHAR(64), nullable=False, default='150000',
                     comment="gas， ETH使用, 如果不给出确定性的, 则使用150000, 如果为0则表示使用使用系统判断")
     gas_price = db.Column(db.VARCHAR(64), nullable=False, default=str(20 * 1000 * 1000 * 1000),

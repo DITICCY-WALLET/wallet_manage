@@ -48,7 +48,7 @@ def get_block_height():
 @v1.route('/newAddress', methods=['POST'])
 def new_address():
     """生成新地址
-    生成新地址, 当前接口是同步响应返回, 所以该方法不建议一次调用超过1000
+    生成新地址, 当前接口是同步响应返回, 所以该方法不建议一次调用超过10
     V2 版本将升级为异步, 需要提供 callback 地址, 届时可生成较大数量地址
 
     `该接口必须要在先设置密码后才能使用`
@@ -62,7 +62,7 @@ def new_address():
 
     | args | nullable | type | default | remark |
     |--------|--------|--------|--------|--------|
-    | count | false | int | 1000 | 生成地址数量 |
+    | count | false | int | 10 | 生成地址数量 |
 
     #### return
     | args | nullable | type | remark |
@@ -77,7 +77,7 @@ def new_address():
 
     if _json is not None:
         coin = _json.get("coin", 'Ethereum')
-        count = _json.get("count")
+        count = _json.get("count", 10)
         if count is not None and isinstance(count, int):
             return make_response(jsonify(create_address(project_id, coin, count)))
 

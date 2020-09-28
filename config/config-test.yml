@@ -1,4 +1,6 @@
-DEBUG: true
+# DEBUG 配置可能导致会同时启动2个进程, 这将会导致部分异常, 请注意.
+# 该问题来源来 Flask
+#DEBUG: true
 TESTING: true
 SQLALCHEMY_ECHO: true
 OPEN_SIGN_AUTH: false
@@ -11,8 +13,8 @@ JOBS:
   - id: scanChain
     func: 'tasks.scan_chain:run_sync'
     trigger: cron
-    second: '0'
-    minute: '*/1'
+    second: '*/10'
+    minute: '*'
 
   - id: depositChain
     func: 'tasks.scan_chain:notify_project'
@@ -24,9 +26,9 @@ JOBS:
     func: 'tasks.scan_chain:collection_eth'
     trigger: cron
     second: '0'
-    minute: '0'
-    hour: '*/1'
+    minute: '*/1'
+#    hour: '*/1'
+#    hour: '*/1'
 
-
-ENV:
-  Environment: test
+COLLECTION_ADDRESS: "0xeCB50aEEFE28a662B4aEE0267F66273d5A582928"
+COLLECTION_MIN_ETH: 0.004

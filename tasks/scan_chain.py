@@ -8,8 +8,9 @@ from blue_print.v1.controller import check_passphrase, get_secret
 from coin.resolver.eth_resolver import EthereumResolver
 
 from digit import digit
-from enumer.coin_enum import SendEnum, TxTypeEum, TxStatus
-from exceptions import SyncError
+from digit.digit import hex_to_int
+from enumer.coin_enum import SendEnum, TxTypeEnum, TxStatusEnum
+from exceptions import SyncError, PasswordError
 from models.models import Coin, Address, Transaction, RpcConfig, ProjectCoin, ProjectOrder, SyncConfig, Block, Project
 from exts import db
 from config import runtime
@@ -22,7 +23,7 @@ logger = logging.getLogger('flask')
 class ScanEthereumChain(object):
     COIN_NAME = 'Ethereum'
     SCAN_HEIGHT_NUMBER = 50
-    SCAN_DELAY_NUMBER = 20
+    SCAN_DELAY_NUMBER = 12
 
     def __init__(self):
         self.rpc = None
@@ -80,21 +81,30 @@ class ScanEthereumChain(object):
         self.highest_height = self.block_info.highest_height
         # 延迟扫 SCAN_DELAY_NUMBER 个块
         need_to_height = self.newest_height - self.SCAN_DELAY_NUMBER
-        while self.current_scan_height <= need_to_height:
+        logger.info('起始扫块高度：{} 最新高度：{} 需要同步：{}'.format(
+            self.current_scan_height,
+            self.newest_height,
+            need_to_height - self.current_scan_height))
+        while self.current_scan_height < need_to_height:
             logger.info('当前已扫块高度：{} 最新高度：{} 需要同步：{}  节点最高高度：{}'.format(
                 self.current_scan_height, self.newest_height,
                 need_to_height - self.current_scan_height,
                 self.highest_height))
 
-            # 分批处理, 一次处理 SCAN_HEIGHT_NUMBER 个块
-            for height in range(self.current_scan_height + 1, need_to_height, self.SCAN_HEIGHT_NUMBER):
+            for height in range(self.current_scan_height, need_to_height, self.SCAN_HEIGHT_NUMBER):
+                # 分批处理, 一次处理 SCAN_HEIGHT_NUMBER 或 剩余要处理的块
+                block_batch = min(self.SCAN_HEIGHT_NUMBER, need_to_height - self.current_scan_height)
+
                 blocks = self.rpc.get_block_by_number([digit.int_to_hex(height) for height in
-                                                       range(height, height + self.SCAN_HEIGHT_NUMBER)])
+                                                       range(height, height + block_batch)])
+                save_tx_count = 0
                 with runtime.app.app_context():
                     # 一次处理一批
                     session = db.session()
                     try:
                         for block in blocks:
+                            if block is None:
+                                return
                             block_height = digit.hex_to_int(block['number'])
                             block_hash = block['hash']
                             block_timestamp = digit.hex_to_int(block['timestamp'])
@@ -106,13 +116,11 @@ class ScanEthereumChain(object):
                             session.commit()
 
                             for transaction in block.get('transactions', []):
-                                sender = transaction['from']
-                                receiver = transaction['to']
-                                if sender in runtime.project_address:
+                                tx = EthereumResolver.resolver_transaction(transaction)
+                                if tx.sender in runtime.project_address:
                                     # 提现的暂时不要
                                     continue
-                                if receiver in runtime.project_address:
-                                    tx = EthereumResolver.resolver_transaction(transaction)
+                                if tx.receiver in runtime.project_address:
                                     receipt_raw_tx = self.rpc.get_transaction_receipt(tx.tx_hash)
                                     if tx.contract:
                                         coin = runtime.coins.get(tx.contract)
@@ -128,28 +136,44 @@ class ScanEthereumChain(object):
                                         raise
                                     tx.status = receipt_tx.status
                                     # session.begin(subtransactions=True)
-                                    db_tx = Transaction(block_id=block.id, coin_id=coin['coin_id'],
-                                                        tx_hash=tx.tx_hash, height=block.height,
-                                                        block_time=block_timestamp,
-                                                        amount=tx.value, sender=tx.sender, receiver=tx.receiver,
-                                                        gas=tx.gas, gas_price=tx.gas_price, is_send=SendEnum.NOT_PUSH,
-                                                        fee=receipt_tx.gas_used * tx.gas_price,
-                                                        contract=tx.contract, status=receipt_tx.status,
-                                                        type=TxTypeEum.DEPOSIT)
-                                    session.add(db_tx)
+                                    # db_tx = Transaction(block_id=db_block.id, coin_id=coin['coin_id'],
+                                    #                     tx_hash=tx.tx_hash, height=db_block.height,
+                                    #                     block_time=block_timestamp,
+                                    #                     amount=tx.value, sender=tx.sender, receiver=tx.receiver,
+                                    #                     gas=tx.gas, gas_price=tx.gas_price,
+                                    #                     is_send=SendEnum.NOT_PUSH.value,
+                                    #                     fee=receipt_tx.gas_used * tx.gas_price,
+                                    #                     contract=tx.contract, status=receipt_tx.status,
+                                    #                     type=TxTypeEnum.DEPOSIT.value)
+                                    Transaction.add_transaction_or_update(
+                                        block_id=db_block.id, coin_id=coin['coin_id'],
+                                        tx_hash=tx.tx_hash, height=db_block.height,
+                                        block_time=block_timestamp,
+                                        amount=tx.value, sender=tx.sender, receiver=tx.receiver,
+                                        gas=tx.gas, gas_price=tx.gas_price,
+                                        is_send=SendEnum.NOT_PUSH.value,
+                                        fee=receipt_tx.gas_used * tx.gas_price,
+                                        contract=tx.contract, status=receipt_tx.status,
+                                        type=TxTypeEnum.DEPOSIT.value, session=session
+                                    )
+                                    save_tx_count += 1
+                                    # session.add(db_tx)
                                     # session.commit()
                                     # 添加推送信息
 
                         session.query(SyncConfig).filter(SyncConfig.id == self.config_id).update(
-                            {'synced_height': height + self.SCAN_HEIGHT_NUMBER,
+                            {'synced_height': height + block_batch,
                              'highest_height': self.highest_height}
                         )
+                        self.current_scan_height = height + block_batch
                         session.commit()
+                        logger.info("本次同步高度为：{} -- {}, 保存交易： {} 笔".format(height, height + block_batch, save_tx_count))
 
                     except Exception as e:
                         logger.error('同步块出现异常, 事务回滚. {}'.format(e))
                         session.rollback()
                         return
+        logger.info("扫链结束, 本次同步")
 
 
 class DepositEthereumChain(object):
@@ -172,32 +196,32 @@ class DepositEthereumChain(object):
                     })
 
     def deposit(self):
-        no_push_txs = Transaction.query.filter(is_send=SendEnum.NOT_PUSH)
-        for tx in no_push_txs:
-            receiver = tx.receiver
-            project_addr = runtime.project_address.get(receiver)
-            if not project_addr:
-                continue
-            project = self.project.get(project_addr['project_id'])
-            tx_hash = tx.tx_hash
-            url = project['url']
-            params = {
-                "txHash": tx.tx_hash,
-                "blockHeight": tx.height,
-                "amount": tx.amount,
-                "address": tx.receiver,
-                "orderid": uuid.uuid4().hex
-            }
-            try:
-                rsp = requests.post(url, params=params)
-            except Exception as e:
-                logger.error("请求为 {} 上账不成功, 内容 {}, 错误： {}".format(project['name'], params, e))
-                continue
-            if rsp.status_code == 200:
-                with runtime.app.app_context():
+        with runtime.app.app_context():
+            no_push_txs = Transaction.query.filter(Transaction.is_send == SendEnum.NOT_PUSH.value)
+            for tx in no_push_txs:
+                receiver = tx.receiver
+                project_addr = runtime.project_address.get(receiver)
+                if not project_addr:
+                    continue
+                project = self.project.get(project_addr['project_id'])
+                tx_hash = tx.tx_hash
+                url = project['url']
+                params = {
+                    "txHash": tx.tx_hash,
+                    "blockHeight": tx.height,
+                    "amount": tx.amount,
+                    "address": tx.receiver,
+                    "orderid": uuid.uuid4().hex
+                }
+                try:
+                    rsp = requests.post(url, params=params)
+                except Exception as e:
+                    logger.error("请求为 {} 上账不成功, 内容 {}, 错误： {}".format(project['name'], params, e))
+                    continue
+                if rsp.status_code == 200:
                     session = db.session()
                     session.query(Transaction).filter(tx.hash == tx_hash).update(
-                        {'is_send': SendEnum.PUSHED})
+                        {'is_send': SendEnum.PUSHED.value})
                     session.commit()
 
 
@@ -222,39 +246,41 @@ class CollectionEthereumChain(object):
                     "address": [addr]
                 }
         with runtime.app.app_context():
-            for project in self.project_addresses:
+            for pk, project in self.project_addresses.items():
                 project_id = project['project_id']
                 coin_name = self.COIN_NAME
                 project_coin = ProjectCoin.get_pro_coin_by_pid_cname(project_id, coin_name)
                 is_valid_secret, secret_result = get_secret(project_id, coin_name)
                 if not is_valid_secret:
-                    continue
+                    logger.warn("归集程序未设置密码..")
+                    raise PasswordError("归集程序未设置密码..")
                 secret = secret_result
                 is_valid, result, passphrase, rpc = check_passphrase(project_coin, secret)
                 self.rpc = rpc
                 self.project_addresses[project_id]['passphrase'] = passphrase
 
     def collection(self):
-        for p in self.project_addresses:
+        for pid, p in self.project_addresses.items():
             project_address = p['address']
-            for coin in runtime.coins:
+            for ck, coin in runtime.coins.items():
                 contract = coin['contract']
                 offset, count = 0, self.BALANCE_QUERY_NUMBER
-                for s in range(0, len(p['address']), count):
-                    addresses = project_address[offset, count]
+                for s in range(0, len(project_address), count):
+                    addresses = project_address[offset:count]
                     balances = self.rpc.get_balance(addresses, contract)
                     balances_sum = sum([digit.hex_to_int(balance) for balance in balances if balance])
                     if not balances_sum:
                         logger.info("本 {} 个地址不需要归集".format(len(addresses)))
                         continue
                     for idx, balance in enumerate(balances):
-                        if balance:
-                            if not hasattr(config, 'GAS'):
+                        balance_int = hex_to_int(balance)
+                        if balance_int:
+                            if hasattr(config, 'GAS'):
                                 gas = config.GAS
                             else:
                                 gas = self.rpc.get_smart_fee(contract=contract)
 
-                            if not hasattr(config, 'GAS_PRICE'):
+                            if hasattr(config, 'GAS_PRICE'):
                                 gas_price = config.GAS_PRICE
                             else:
                                 gas_price = self.rpc.gas_price()
@@ -266,14 +292,26 @@ class CollectionEthereumChain(object):
                                 logger.info("未找到合适 gas_price . {}".format(gas_price))
                                 continue
 
-                            tx_hash = self.rpc.send_transaction(sender=addresses[idx], receiver=config.COLLECTION_ADDRESS,
-                                                      value=balance, passphrase=p['passphrase'],
-                                                      gas=gas, gas_price=gas_price, contract=contract)
+                            gas, gas_price = hex_to_int(gas), hex_to_int(gas_price)
+                            fee = gas * gas_price
+                            if coin['symbol'] == 'ETH':
+                                send_value = max(balance_int - max(int(config.COLLECTION_MIN_ETH * 1e18), fee), 0)
+                            else:
+                                send_value = balance_int
+
+                            if send_value <= 0:
+                                logger.info("地址 {} 需要归集金额低于 0".format(addresses[idx]))
+                                continue
+
+                            tx_hash = self.rpc.send_transaction(
+                                sender=addresses[idx], receiver=config.COLLECTION_ADDRESS,
+                                value=send_value, passphrase=p['passphrase'],
+                                gas=gas, gas_price=gas_price, contract=contract)
                             with runtime.app.app_context():
                                 saved = Transaction.add_transaction(
-                                    coin_id=coin['coin_id'], tx_hash=tx_hash, block_time=datetime.now(),
+                                    coin_id=coin['coin_id'], tx_hash=tx_hash, block_time=datetime.now().timestamp(),
                                     sender=addresses[idx], receiver=config.COLLECTION_ADDRESS, amount=balance,
-                                    status=TxStatus.UNKNOWN, type=TxTypeEum.COLLECTION,
+                                    status=TxStatusEnum.UNKNOWN.value, type=TxTypeEnum.COLLECTION.value,
                                     block_id=-1, height=-1, gas=gas, gas_price=gas_price,
                                     contract=contract)
 
