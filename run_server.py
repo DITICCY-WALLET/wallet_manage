@@ -13,6 +13,7 @@ from models.models import ApiAuth
 from exts import db
 from config.config import config
 from tasks.scan_chain import ScanEthereumChain
+from lock import ProcessLock
 
 app = Flask(__name__)
 
@@ -82,6 +83,7 @@ if __name__ == '__main__':
 
     scheduler = APScheduler()
     scheduler.init_app(app)
-    scheduler.start()
+    scheduler_lock = ProcessLock(scheduler.start, filename='wallet-manage-scheduler.lock')
+    scheduler_lock.lock_run()
 
     app.run(port=config.PORT)

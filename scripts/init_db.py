@@ -60,11 +60,12 @@ pc = ProjectCoin()
 pc.id = 1
 pc.project_id = project.id
 pc.coin_id = eth_coin.id
-pc.hot_address = "待更新"
+pc.hot_address = "0xaeb184f8872191d9995c713d7e424a68fdb4e5b1"
 pc.hot_secret = "保留.."
 pc.hot_pb = rsa_key['public_key']
 pc.hot_pk = rsa_key['private_key']
 pc.cold_address = "待更新"
+pc.fee_address = "0x69ebf7a64a8ce92d07afe7ba810933dce18e75dd"
 
 session.add(pc)
 

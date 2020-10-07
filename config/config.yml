@@ -30,30 +30,40 @@ LOG_CONF:
   disable_existing_loggers: false
   formatters:
     standard:
-      format: '%(asctime)s [%(levelname)s] %(name)s: %(message)s'
-    flask:
       format: '[%(asctime)s] {%(filename)s %(lineno)d} %(levelname)s - %(message)s'
   handlers:
     default:
       level: 'INFO'
-      formatter: 'flask'
+      formatter: 'standard'
       class: 'logging.StreamHandler'
       stream: 'ext://sys.stdout'
-    info:
+    console:
       level: 'INFO'
-      formatter: 'flask'
+      formatter: 'standard'
       class: 'logging.StreamHandler'
       stream: 'ext://sys.stdout'
     debug:
       level: 'DEBUG'
-      formatter: 'flask'
+      formatter: 'standard'
       class: 'logging.StreamHandler'
       stream: 'ext://sys.stdout'
+    file:
+      level: 'INFO'
+      formater: 'standard'
+      class: 'logging.handlers.TimedRotatingFileHandler'
+      filename: '/var/logs/wallet_manage.log'
+      when: 'D'
+      interval: 1
   loggers:
-    flask:
+    default:
       handlers:
-        - info
-        - debug
+        - console
+        - file
       level: INFO
       propagate: false
-
+    debug:
+      handlers:
+        - console
+        - debug
+      level: DEBUG
+      propagate: false

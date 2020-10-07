@@ -30,5 +30,16 @@ JOBS:
 #    hour: '*/1'
 #    hour: '*/1'
 
+  - id: render
+    func: 'tasks.scan_chain:render_eth'
+    trigger: cron
+    second: '0'
+    minute: '*/1'
+#    hour: '*/1'
+#    hour: '*/1'
+
 COLLECTION_ADDRESS: "0xeCB50aEEFE28a662B4aEE0267F66273d5A582928"
 COLLECTION_MIN_ETH: 0.004
+RENDER_ADDRESS: "0x69ebf7a64a8ce92d07afe7ba810933dce18e75dd"
+RENDER_AMOUNT: 0.01
+GAS: "0x249f0"

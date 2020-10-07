@@ -4,6 +4,7 @@ from sqlalchemy import UniqueConstraint
 
 from coin.driver.driver_base import DriverFactory
 from dt import now
+from enumer.coin_enum import SendEnum
 from exts import db
 from flask_sqlalchemy import orm
 
@@ -201,7 +202,6 @@ class Address(db.Model):
 class Transaction(db.Model):
     __tablename__ = 'tx'
     __table_args__ = (
-        UniqueConstraint('block_id', 'coin_id', name='uk_block_id_coin_id'),
         UniqueConstraint('tx_hash', 'coin_id', name='uk_tx_hash_coin_id'),
         {'mysql_engine': "INNODB"}
     )
@@ -251,7 +251,7 @@ class Transaction(db.Model):
 
         tx = Transaction(coin_id=coin_id, tx_hash=tx_hash, block_time=block_time, sender=sender, receiver=receiver,
                          amount=amount, status=status, type=type, gas=gas, gas_price=gas_price, fee=fee,
-                         contract=contract, block_id=block_id, height=height)
+                         contract=contract, block_id=block_id, height=height, is_send=SendEnum.NEEDLESS.value)
         # saved 如果成功情况下是 None
         saved = session.add(tx)
         if commit:
@@ -356,7 +356,8 @@ class ProjectCoin(db.Model):
     gas_price = db.Column(db.VARCHAR(64), nullable=False, default=str(20 * 1000 * 1000 * 1000),
                           comment="gasPrice, 如果不给出, 则默认按20G, 如果为0则表示使用使用系统判断")
     fee = db.Column(db.VARCHAR(64), nullable=False, default=0, comment="真手续费金额, ETH为 gas * gas_price")
-    cold_address = db.Column(db.VARCHAR(128), nullable=False, comment="冷钱包地址")
+    cold_address = db.Column(db.VARCHAR(128), default=None, comment="冷钱包地址")
+    fee_address = db.Column(db.VARCHAR(128), default=None, comment="手续费钱包地址")
     last_collection_time = db.Column(db.DateTime, default=None, comment="最后归集时间", onupdate=datetime.now)
     create_time = db.Column(db.DateTime, nullable=False, comment="创建时间", default=datetime.now)
     update_time = db.Column(db.DateTime, nullable=False, comment="更新时间", default=datetime.now, onupdate=datetime.now)

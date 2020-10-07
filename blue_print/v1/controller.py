@@ -145,11 +145,12 @@ def get_tx_by_tx_hash(tx_hash: str):
                                             "value": safe_math.divided(tx.Transaction.amount,
                                                                        safe_math.e_calc(tx.Coin.decimal)
                                                                        ).to_eng_string(),
-                                            "blockHeight": tx.Transaction.block_height,
-                                            "blockTime": tx.Transaction.block_times,
+                                            "blockHeight": tx.Transaction.height,
+                                            "blockTime": tx.Transaction.block_time,
                                             "contract": tx.Transaction.contract,
-                                            "isValid": True if tx.status == 1 else False,
-                                            "confirmNumber": chain_info.highest_height - tx.block_height
+                                            "isValid": True if tx.Transaction.status == 1 else False,
+                                            "confirmNumber": chain_info.highest_height - tx.Transaction.height
+                                            if tx.Transaction.height > 0 else 0
                                             })
     else:
         tx_origin, receipt_origin = rpc.get_transaction_by_hash(tx_hash)
