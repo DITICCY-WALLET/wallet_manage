@@ -71,19 +71,19 @@ def echo():
     print(1)
 
 
+app.config.from_object(config)
+app.app_context().push()
+ApiDoc(app)
+db.init_app(app)
+
+# 预读数据到缓存中
+ScanEthereumChain.read_address()
+ScanEthereumChain.read_coins()
+
+scheduler = APScheduler()
+scheduler.init_app(app)
+scheduler_lock = ProcessLock(scheduler.start, filename='wallet-manage-scheduler.lock')
+scheduler_lock.lock_run()
+
 if __name__ == '__main__':
-    app.config.from_object(config)
-    app.app_context().push()
-    ApiDoc(app)
-    db.init_app(app)
-
-    # 预读数据到缓存中
-    ScanEthereumChain.read_address()
-    ScanEthereumChain.read_coins()
-
-    scheduler = APScheduler()
-    scheduler.init_app(app)
-    scheduler_lock = ProcessLock(scheduler.start, filename='wallet-manage-scheduler.lock')
-    scheduler_lock.lock_run()
-
     app.run(port=config.PORT)

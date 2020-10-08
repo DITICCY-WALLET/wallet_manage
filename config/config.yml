@@ -49,7 +49,7 @@ LOG_CONF:
       stream: 'ext://sys.stdout'
     file:
       level: 'INFO'
-      formater: 'standard'
+      formatter: 'standard'
       class: 'logging.handlers.TimedRotatingFileHandler'
       filename: '/var/logs/wallet_manage.log'
       when: 'D'
