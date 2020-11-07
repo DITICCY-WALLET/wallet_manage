@@ -290,3 +290,32 @@ def set_passphrase(project_id, coin_name, secret):
 def set_deposit_order_id(project_id, order_id, address):
     """该接口暂时无法使用"""
     ...
+
+
+def get_coin_list():
+    coin_list = Coin.get_all_coin()
+    return coin_list
+
+
+def add_coin_ctl(master_name: str, contract: str):
+    rpc = RpcConfig.get_rpc()
+    coin = Coin.get_coin(name=master_name)
+    if not coin:
+        return ResponseObject.error(**not_support_coin)
+
+    if coin.is_support_token == 0:
+        return ResponseObject.error(**coin_support_token)
+    name, symbol, decimals, total = rpc.get_contract_info(contract)
+    saved = Coin.add_coin(master_id=coin.id, name=name, symbol=symbol, decimal=decimals,
+                          supply=total, is_master=0, bip44=0, contract=contract)
+
+    if name is None or name == "":
+        return ResponseObject.error(**coin_token_error)
+    if symbol is None or symbol == "":
+        return ResponseObject.error(**coin_token_error)
+
+    if saved:
+        return ResponseObject.success(data=True)
+    return ResponseObject.error(**data_op_fail)
+
+

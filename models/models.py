@@ -78,6 +78,8 @@ class Coin(db.Model):
     supply = db.Column(db.BigInteger, comment='发行量')
     is_master = db.Column(db.SmallInteger, default=1, comment='是否主链币 1 是 0 否')
     bip44 = db.Column(db.Integer, default=1, comment='bip44 编码')
+    is_support_token = db.Column(db.SmallInteger, nullable=True, default=0,
+                                 comment='是否支持代币 1)是 2)否')
     contract = db.Column(db.VARCHAR(128), comment="代币名称", unique=True)
     create_time = db.Column(db.DateTime, nullable=False, comment="创建时间", default=datetime.now)
 
@@ -100,6 +102,22 @@ class Coin(db.Model):
     #                         primaryjoin="Coin.master_id==Coin.id",
     #                         foreign_keys="Coin.id",
     #                         backref="Coin")
+
+    @staticmethod
+    def get_all_coin():
+        session = db.session()
+        coin_list_sql = r"""
+        SELECT c1.id, c1.name as coinName, c1.symbol, c1.is_master as isMaster, 
+        c1.contract, c1.supply, IFNULL(c2.name, c1.name) as masterName, c1.decimal
+        from coin as c1 left join coin as c2 on c1.master_id = c2.id;
+        """
+        coin_list = session.execute(coin_list_sql)
+        if coin_list.rowcount <= 0:
+            return []
+        result = []
+        for coin in coin_list:
+            result.append({coin_list.cursor.description[k][0]: v for k, v in enumerate(coin)})
+        return result
 
     def __str__(self):
         return "{id}-{master_id}-{name}-{symbol}-{is_contract}".format(
@@ -145,6 +163,22 @@ class Coin(db.Model):
         if not coin:
             return None
         return coin
+
+    @staticmethod
+    def add_coin(commit=True, **kwargs):
+        """
+        添加币种
+        :param commit: 是否自动提交
+        :param kwargs: Coin 字段
+        :return:
+        """
+        coin = Coin(**kwargs)
+        session = db.session()
+        saved = session.add(coin)
+        if commit:
+            session.commit()
+            return saved
+        return session
 
 
 class Address(db.Model):
@@ -403,7 +437,7 @@ class RpcConfig(db.Model):
             id=self.id, coin_id=self.coin_id, name=self.name, driver=self.driver, host=self.host)
 
     @staticmethod
-    def get_rpc() -> RpcBase:
+    def get_rpc() -> (RpcBase, None):
         """获取rpc, 返回RPC对象"""
         rpc_config = RpcConfig.query.filter_by(driver='Ethereum', status=1).first()
         if not rpc_config:

@@ -46,6 +46,13 @@ def err40x(e):
     return make_response(jsonify(ResponseObject.raise_404_error()), 404)
 
 
+@app.errorhandler(400)
+def err40x(e):
+    if isinstance(e.description, (dict, list)):
+        return make_response(jsonify(e.description), 400)
+    return make_response(jsonify(ResponseObject.raise_args_error(msg="JSON 匹配不正确")), 400)
+
+
 @app.errorhandler(500)
 @app.errorhandler(501)
 @app.errorhandler(502)

@@ -1,11 +1,16 @@
 import json
+from werkzeug.exceptions import abort
 
 from flask import Blueprint, make_response, jsonify, request
-from blue_print.v1.controller import block_height, get_balance_by_address, get_wallet_total_balance, get_tx_by_tx_hash, \
-    is_mine_address, send_transaction_handle, set_passphrase, create_address, set_deposit_order_id
-from code_status import args_error
-from httplibs.response import ResponseObject
+from flask_restful import Api, Resource, reqparse
+from blue_print.v1.controller import block_height, get_balance_by_address, \
+    get_wallet_total_balance, get_tx_by_tx_hash, is_mine_address, send_transaction_handle,\
+    set_passphrase, create_address, set_deposit_order_id
 
+from blue_print.v1 import controller as v1_controller
+
+from httplibs.response import ResponseObject
+from middleware.request_args_parase import RequestJsonParser
 
 v1 = Blueprint('v1', __name__)
 
@@ -16,11 +21,11 @@ def get_json(req):
         try:
             _json = json.loads(request.data)
         except Exception as e:
-            _json = None
+            raise abort(400, ResponseObject.raise_args_error(msg="JSON 匹配不正确"))
     return _json
 
 
-@v1.route('/getBlockHeight', methods=['POST'])
+@v1.route('/getBlockHeight', methods=['POST', 'GET'])
 def get_block_height():
     """获取区块高度
 
@@ -201,7 +206,9 @@ def send_transaction():
         coin = _json.get("coin", 'Ethereum')
         contract = _json.get("contract")
         if None not in [action_id, sender, receiver, amount]:
-            return make_response(jsonify(send_transaction_handle(project_id, action_id, sender, receiver, amount, coin, contract)))
+            return make_response(jsonify(
+                send_transaction_handle(project_id, action_id, sender, receiver, amount, coin,
+                                        contract)))
 
     result = ResponseObject.raise_args_error()
     return make_response(jsonify(result))
@@ -371,3 +378,75 @@ def add_order_id():
 
     result = ResponseObject.raise_args_error()
     return make_response(jsonify(result))
+
+
+@v1.route('/coinList', methods=['POST', "GET"])
+def coin_list():
+    """币种列表
+    返回当前支持的币种
+    @@@
+    #### 签名
+    [x] 必须
+
+    #### args
+
+    | args | nullable | type | default | remark |
+    |--------|--------|--------|--------|--------|
+
+
+    #### return
+    | args | nullable | type | remark |
+    |--------|--------|--------|--------|
+    | coinName | false | String | 币种名称 |
+    | decimal | false | int | 币种Wei |
+    | symbol | false | String | 币种简称 |
+    | masterName | false | String | 币种主链名称, 如果不是合约该名称与coinName相同 |
+    | contract | true | String | 合约地址 |
+    | supply | true | String | 币种总量, 该信息极可能不准确, 仅提供参考价值 |
+
+    - ##### json
+    >
+    @@@
+    :return:
+    :return:
+    """
+    list_coin = v1_controller.get_coin_list()
+    return ResponseObject.success(data=list_coin)
+
+
+@v1.route('/addCoin', methods=['POST'])
+def add_coin():
+    """币种列表
+    返回当前支持的币种
+    @@@
+    #### 签名
+    [x] 必须
+
+    #### args
+
+    | args | nullable | type | default | remark |
+    |--------|--------|--------|--------|--------|
+    | masterName | false | String | | 币种主链名称, 如果不是合约该名称与coinName相同 |
+    | contract | false | String | | 合约地址 |
+
+    #### return
+    | args | nullable | type | remark |
+    |--------|--------|--------|--------|
+    | isAdd | false | bool | 币种主链名称, 如果不是合约该名称与coinName相同 |
+
+    - ##### json
+    >
+    @@@
+    :return:
+    """
+
+    parser = RequestJsonParser()
+    parser.add_argument("masterName", type=str, required=True, trim=True, helper={
+        "required": "masterName 不可缺失", "type": "masterName 类型不匹配"})
+    parser.add_argument("contract", type=str, required=True, trim=True,
+                        helper="字段必须以0x开头")
+    args = parser.get_argument()
+    is_success = ...
+    return make_response(jsonify(ResponseObject.success(data=list_coin)))
+
+
