@@ -32,13 +32,13 @@ def auth():
             return make_response(jsonify(ResponseObject.raise_sign_exception()), 200)
         if isinstance(allow, dict):
             return make_response(jsonify(ResponseObject.error(**allow)), 200)
-        else:
-            if _auth.api_auth.project_id is None:
-                return make_response(jsonify(ResponseObject.error(**sign_key_not_bind_project)), 200)
-            request.project_id = _auth.api_auth.project_id
+        # 如果是有
+        if _auth.api_auth.project_id is None:
+            return make_response(jsonify(ResponseObject.error(**sign_key_not_bind_project)), 200)
+        request.projectId = _auth.api_auth.project_id
     if not app.config.get('OPEN_SIGN_AUTH'):
         # 为调试使用
-        request.project_id = 1
+        request.projectId = 1
 
 
 @app.errorhandler(404)

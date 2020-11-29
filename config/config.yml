@@ -51,7 +51,7 @@ LOG_CONF:
       level: 'INFO'
       formatter: 'standard'
       class: 'logging.handlers.TimedRotatingFileHandler'
-      filename: '/var/logs/wallet_manage.log'
+      filename: '/var/logs/apps/wallet_manage.log'
       when: 'D'
       interval: 1
   loggers:

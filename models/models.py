@@ -11,6 +11,7 @@ from httplibs.coinrpc.rpcbase import RpcBase
 from sqlalchemy import UniqueConstraint
 
 from exts import db
+from enumer.routine import DBStatusEnum
 
 
 class ApiAuth(db.Model):
@@ -107,9 +108,9 @@ class Coin(db.Model):
     def get_all_coin():
         session = db.session()
         coin_list_sql = r"""
-        SELECT c1.id, c1.name as coinName, c1.symbol, c1.is_master as isMaster, 
-        c1.contract, c1.supply, IFNULL(c2.name, c1.name) as masterName, c1.decimal
-        from coin as c1 left join coin as c2 on c1.master_id = c2.id;
+        SELECT c1.id, c1.name as coinName, c1.symbol, c1.is_master as isMaster,
+        c1.is_support_ooken, c1.contract, c1.supply, IFNULL(c2.name, c1.name) as masterName,
+        c1.decimal from coin as c1 left join coin as c2 on c1.master_id = c2.id;
         """
         coin_list = session.execute(coin_list_sql)
         if coin_list.rowcount <= 0:
@@ -125,7 +126,29 @@ class Coin(db.Model):
             is_contract=self.is_contract and True or False)
 
     @staticmethod
-    def get_coin(contract=None, symbol=None, name=None, is_master=1):
+    def get_coin_lj_contract(name, contract):
+        session = db.session()
+        coin_left_join_contract_sql = r"""
+        SELECT c1.id, c1.name as coinName, c2.name, c2.contract from
+        coin as c1 left join coin as c2 on c1.master_id = c2.id where c2.name = '{}' 
+        and c1.contract = '{}' limit 1
+        """.format(name, contract)
+        coin = session.execute(coin_left_join_contract_sql)
+        return coin
+
+    @staticmethod
+    def get_coin_lj_contract_by_id(coin_id, contract):
+        session = db.session()
+        coin_left_join_contract_sql = r"""
+            SELECT c1.id, c1.name as coinName, c2.name, c2.contract from
+            coin as c1 left join coin as c2 on c1.master_id = c2.id where c1.id = '{}' 
+            and c2.contract = '{}' limit 1
+            """.format(coin_id, contract)
+        coin = session.execute(coin_left_join_contract_sql)
+        return coin
+
+    @staticmethod
+    def get_coin(contract=None, symbol=None, name=None, is_master=1, coin_id=None):
         """从数据库中获取某个币种"""
         params = {'is_master': is_master}
         if contract is not None:
@@ -135,6 +158,8 @@ class Coin(db.Model):
             params['symbol'] = symbol
         if name is not None:
             params['name'] = name
+        if coin_id is not None:
+            params['coin_id'] = coin_id
         coin = Coin.query.filter_by(**params).first()
         if not coin:
             return None
@@ -202,7 +227,7 @@ class Address(db.Model):
         default=0,
         index=True,
         comment="是否已给予，0否 1是")
-    status = db.Column(db.SmallInteger, default=1, comment="是否有效，0否 1是")
+    status = db.Column(db.SmallInteger, default=1, comment="是否有效，0否 1是 2)移除")
     create_time = db.Column(
         db.DateTime,
         nullable=False,
@@ -275,6 +300,15 @@ class Address(db.Model):
             Address.address, Address.project_id, Address.coin_id, Coin.name
         ).filter(Coin.name == coin_name).all()
         return addresses
+
+    @staticmethod
+    def get_address_by_pca(project_id, coin_id, address):
+        """根据 Project 与 Coin 和 Address 获取行"""
+        session = db.session()
+        address = session.query(Address).filter(project_id == project_id,
+                                                coin_id == coin_id,
+                                                address == address).one()
+        return address
 
 
 class Transaction(db.Model):
@@ -437,6 +471,15 @@ class RpcConfig(db.Model):
             id=self.id, coin_id=self.coin_id, name=self.name, driver=self.driver, host=self.host)
 
     @staticmethod
+    def get_rpc_by_coin(coin_id):
+        rpc_config = RpcConfig.query.filter_by(coin_id=coin_id).first()
+        if not rpc_config:
+            return None
+        driver = rpc_config.driver
+        rpc = DriverFactory(driver, driver.host)
+        return rpc
+
+    @staticmethod
     def get_rpc() -> (RpcBase, None):
         """获取rpc, 返回RPC对象"""
         rpc_config = RpcConfig.query.filter_by(driver='Ethereum', status=1).first()
@@ -461,6 +504,8 @@ class Project(db.Model):
                              comment="回调地址, 示例http[s]://[user]:[passwd]@[ip|domain]:[port]")
     access_key = db.Column(db.VARCHAR(128), comment="回调签名 access_key")
     secret_key = db.Column(db.VARCHAR(128), comment="回调签名 secret_key")
+    hot_pb = db.Column(db.TEXT, comment="加密公钥, 给到项目方, 特殊事件使用.")
+    hot_pk = db.Column(db.TEXT, comment="加密私钥, 解密 PB.")
     create_time = db.Column(db.DateTime, nullable=False,
                             comment="创建时间", default=datetime.now)
     update_time = db.Column(db.DateTime, nullable=False,
@@ -474,6 +519,27 @@ class Project(db.Model):
     def __str__(self):
         return "{id}-{name}-{access_key}-{callback_url}".format(
             id=self.id, name=self.name, access_key=self.access_key, callback_url=self.callback_url)
+
+    @staticmethod
+    def get_project_coin_by_id(project_id):
+        """
+        获得项目方的完整资料
+        :param project_id: 项目方 ID
+        :return:
+        """
+        session = db.session()
+        project_infos = session.query(
+            Project, ProjectCoin, Coin).join(
+            ProjectCoin,
+            ProjectCoin.project_id == Project.id).join(
+            Coin,
+            ProjectCoin.coin_id == Coin.id).filter(
+            Project.id == project_id)
+        return project_infos
+
+    @staticmethod
+    def get_project_by_id(project_id):
+        session = db.session()
 
 
 class ProjectCoin(db.Model):
@@ -489,15 +555,19 @@ class ProjectCoin(db.Model):
     coin_id = db.Column(db.Integer, nullable=False, comment="主链币 ID")
     hot_address = db.Column(db.VARCHAR(128), nullable=False, comment="热钱包地址")
     hot_secret = db.Column(db.VARCHAR(128), nullable=False, comment="热钱包密钥, 保留字段, 未使用")
-    hot_pb = db.Column(db.TEXT, comment="热钱包密钥加密公钥")
-    hot_pk = db.Column(db.TEXT, comment="热钱包密钥加密私钥")
     gas = db.Column(db.VARCHAR(64), nullable=False, default='150000',
                     comment="gas, 默认150000, 0为自动处理")
     gas_price = db.Column(db.VARCHAR(64), nullable=False, default=str(20 * 1000 * 1000 * 1000),
                           comment="gasPrice, 默认20G, 0为自动处理")
     fee = db.Column(db.VARCHAR(64), nullable=False, default=0, comment="真实手续费")
-    cold_address = db.Column(db.VARCHAR(128), default=None, comment="冷钱包地址")
+    collect_address = db.Column(db.VARCHAR(128), default=None, comment="冷钱包地址")
     fee_address = db.Column(db.VARCHAR(128), default=None, comment="手续费钱包地址")
+    is_deposit = db.Column(db.SmallInteger, nullable=False, default=DBStatusEnum.YES.value,
+                           comment="是否充值 0:否 1:是")
+    is_withdraw = db.Column(db.SmallInteger, nullable=False, default=DBStatusEnum.YES.value,
+                            comment="是否提现 0:否 1:是")
+    is_collect = db.Column(db.SmallInteger, nullable=False, default=DBStatusEnum.YES.value,
+                           comment="是否归集 0:否 1:是")
     last_collection_time = db.Column(db.DateTime, default=None,
                                      comment="最后归集时间", onupdate=datetime.now)
     create_time = db.Column(db.DateTime, nullable=False,
@@ -530,6 +600,32 @@ class ProjectCoin(db.Model):
             ProjectCoin.project_id == project_id,
             Coin.name == coin_name)
         return project_coin.first()
+
+    @staticmethod
+    def get_pc_project_by_pid_cid(project_id, coin_id):
+        """根据币种名称及项目方ID 获取项目方支持币种"""
+        session = db.session()
+        project_coin = session.query(
+            Project,
+            ProjectCoin,
+            ).join(
+            Project,
+            ProjectCoin.project_id == Project.id).filter(
+            ProjectCoin.project_id == project_id,
+            ProjectCoin.coin_id == coin_id)
+        return project_coin.first()
+
+    @staticmethod
+    def get_pc_by_pid_cid(project_id, coin_id):
+        """根据PID 与 CID 查询单个币种"""
+        session = db.session()
+        project_coin = session.query(
+            ProjectCoin).filter(
+            ProjectCoin.id == project_id, ProjectCoin.coin_id == coin_id).one()
+        return project_coin.first()
+
+    # @staticmethod
+    # def get_pro
 
 
 class ProjectOrder(db.Model):

@@ -10,6 +10,8 @@ from code_status import (sign_error, sign_timeout, sign_require, sign_msg_error,
 class Auth(object):
     __EXCLUDE = ['signsture', 'accessKey']
     __SIGN_REQUIRE = __EXCLUDE + ['timestamp']
+    # 秒 * 分
+    # TODO 为了方便调试, 这里 * 1000000 确保接口不会超期请求.
     TIMEOUT_SECONDS = 60 * 5 * 1000000
 
     def __init__(self, request):

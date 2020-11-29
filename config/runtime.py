@@ -4,7 +4,7 @@ from config.config import CONFIG
 此处结构为：
 {
     project_id: {
-        coin_name: {
+        coin_id: {
             'secret': secret,
             'crypto': rsa_crypto_obj
         }
