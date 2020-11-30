@@ -48,7 +48,6 @@ session.add(usdt_coin)
 project = Project()
 project.id = 1
 project.name = "Lucky"
-# project.callback_url = "http://agent.niuniu2020.com/upayret/payret"
 project.callback_url = "http://www.bcfssdlfjsdd.com/upayret/payret"
 project.access_key = sign_key['access_key']
 project.secret_key = sign_key['secret_key']
